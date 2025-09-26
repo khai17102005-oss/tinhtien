@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Chi tiêu tháng — Ghi & Cộng tự động</title>
+  <style>
+    :root{--bg:#f6f8fb;--card:#ffffff;--muted:#61708a;--accent:#0ea5a5}
+    *{box-sizing:border-box}
+    body{margin:0;font-family:Inter,system-ui,Segoe UI,Roboto,'Helvetica Neue',Arial;background:var(--bg);display:flex;align-items:center;justify-content:center;padding:24px}
+    .app{width:100%;max-width:900px}
+    .header{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px}
+    h1{margin:0;font-size:20px}
+    .card{background:var(--card);padding:16px;border-radius:12px;box-shadow:0 6px 20px rgba(20,30,50,0.06)}
+    form{display:grid;grid-template-columns:1fr 1fr 120px 100px;gap:10px;align-items:end}
+    label{font-size:13px;color:var(--muted);display:block;margin-bottom:6px}
+    input[type=text],input[type=number],input[type=date],select{width:100%;padding:10px;border-radius:8px;border:1px solid #e6eef8;background:transparent}
+    button{background:var(--accent);border:0;padding:10px 12px;border-radius:8px;color:white;cursor:pointer}
+    .controls{display:flex;gap:8px}
+    .total{display:flex;gap:12px;align-items:baseline}
+    .big{font-size:28px;font-weight:700}
+    .muted{color:var(--muted)}
+    table{width:100%;border-collapse:collapse;margin-top:14px}
+    th,td{padding:10px;border-bottom:1px solid #f1f5f9;text-align:left}
+    th{font-size:13px;color:var(--muted)}
+    td.amount{text-align:right;font-weight:600}
+    .actions{display:flex;gap:6px}
+    .btn-ghost{background:transparent;border:1px solid #e6eef8;color:var(--muted);padding:8px;border-radius:8px}
+    .small{font-size:13px;color:var(--muted)}
+    @media(max-width:720px){form{grid-template-columns:1fr 1fr;}
+      .header{flex-direction:column;align-items:flex-start;gap:8px}
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <div class="header">
+      <h1>Ghi chi tiêu hàng tháng</h1>
+      <div class="total card" style="padding:12px">
+        <div class="small">Tổng tháng</div>
+        <div class="big" id="monthTotal">0 đ</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <form id="entryForm">
+        <div>
+          <label for="desc">Nội dung</label>
+          <input id="desc" type="text" placeholder="Ví dụ: Tiền ăn, xăng, điện..." required />
+        </div>
+        <div>
+          <label for="amount">Số tiền (đ)</label>
+          <input id="amount" type="number" min="0" step="100" placeholder="100000" required />
+        </div>
+        <div>
+          <label for="date">Ngày</label>
+          <input id="date" type="date" />
+        </div>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <button id="addBtn">Thêm</button>
+          <button type="button" class="btn-ghost" id="clearMonth">Xoá tháng</button>
+        </div>
+      </form>
+
+      <div style="display:flex;gap:8px;margin-top:12px;align-items:center;justify-content:space-between">
+        <div style="display:flex;gap:8px;align-items:center">
+          <label class="small" for="monthSelect">Xem tháng:</label>
+          <select id="monthSelect"></select>
+        </div>
+        <div class="actions">
+          <button class="btn-ghost" id="exportCsv">Xuất CSV</button>
+          <button class="btn-ghost" id="importCsv">Nhập CSV</button>
+          <input id="fileInput" type="file" accept="text/csv" style="display:none" />
+        </div>
+      </div>
+
+      <table id="entriesTable" aria-live="polite">
+        <thead>
+          <tr><th>Ngày</th><th>Nội dung</th><th>Số tiền</th><th></th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+
+      <div class="small" style="margin-top:10px">Dữ liệu được lưu trên trình duyệt (localStorage). Trang sẽ tự cộng tổng khi thêm mục mới.</div>
+    </div>
+  </div>
+
+  <script>
+    // Helpers
+    const formatVND = n => n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.') + ' đ';
+    const todayISO = () => new Date().toISOString().slice(0,10);
+    const monthKey = (dateStr) => {
+      const d = new Date(dateStr);
+      return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0');
+    }
+
+    // State
+    const storagePrefix = 'chi_tieu_';
+    const descEl = document.getElementById('desc');
+    const amountEl = document.getElementById('amount');
+    const dateEl = document.getElementById('date');
+    const addBtn = document.getElementById('addBtn');
+    const entriesTable = document.querySelector('#entriesTable tbody');
+    const monthTotalEl = document.getElementById('monthTotal');
+    const monthSelect = document.getElementById('monthSelect');
+    const clearMonthBtn = document.getElementById('clearMonth');
+    const exportCsvBtn = document.getElementById('exportCsv');
+    const importCsvBtn = document.getElementById('importCsv');
+    const fileInput = document.getElementById('fileInput');
+
+    dateEl.value = todayISO();
+
+    function loadMonths(){
+      monthSelect.innerHTML = '';
+      const keys = Object.keys(localStorage).filter(k=>k.startsWith(storagePrefix)).sort().reverse();
+      if(keys.length===0){
+        const k = monthKey(todayISO());
+        monthSelect.appendChild(new Option(k,k));
+        return;
+      }
+      keys.forEach(k=>{
+        const m = k.replace(storagePrefix,'');
+        monthSelect.appendChild(new Option(m,m));
+      })
+    }
+
+    function loadEntriesFor(month){
+      const raw = localStorage.getItem(storagePrefix + month);
+      return raw ? JSON.parse(raw) : [];
+    }
+
+    function saveEntriesFor(month, arr){
+      localStorage.setItem(storagePrefix + month, JSON.stringify(arr));
+    }
+
+    function render(){
+      const month = monthSelect.value || monthKey(todayISO());
+      const entries = loadEntriesFor(month);
+      entriesTable.innerHTML = '';
+      let total = 0;
+      entries.sort((a,b)=>new Date(b.date)-new Date(a.date)).forEach((e,idx)=>{
+        total += Number(e.amount);
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${e.date}</td><td>${e.desc}</td><td class='amount'>${formatVND(Number(e.amount))}</td><td><button data-i='${idx}' class='btn-ghost'>Xóa</button></td>`;
+        entriesTable.appendChild(tr);
+      });
+      monthTotalEl.textContent = formatVND(total);
+    }
+
+    // Init
+    loadMonths();
+    if(!monthSelect.value) monthSelect.value = monthKey(todayISO());
+    render();
+
+    // Events
+    addBtn.addEventListener('click', e=>{
+      e.preventDefault();
+      const desc = descEl.value.trim();
+      const amount = Number(amountEl.value);
+      const date = dateEl.value || todayISO();
+      if(!desc || !amount){ alert('Nhập nội dung và số tiền hợp lệ'); return; }
+      const key = monthKey(date);
+      const entries = loadEntriesFor(key);
+      entries.push({date,desc,amount});
+      saveEntriesFor(key, entries);
+      // If current viewed month matches, re-render
+      if(monthSelect.value===key){ render(); }
+      // If new month not in select, reload months and set
+      loadMonths();
+      monthSelect.value = key;
+      // Clear inputs
+      descEl.value = '';
+      amountEl.value = '';
+      dateEl.value = todayISO();
+    });
+
+    monthSelect.addEventListener('change', ()=> render());
+
+    entriesTable.addEventListener('click', e=>{
+      if(e.target.tagName==='BUTTON'){
+        const i = Number(e.target.dataset.i);
+        const month = monthSelect.value;
+        const arr = loadEntriesFor(month);
+        if(!confirm('Xóa mục này?')) return;
+        arr.splice(i,1);
+        saveEntriesFor(month, arr);
+        render();
+      }
+    });
+
+    clearMonthBtn.addEventListener('click', ()=>{
+      const m = monthSelect.value;
+      if(confirm('Xóa toàn bộ dữ liệu tháng ' + m + ' ?')){
+        localStorage.removeItem(storagePrefix + m);
+        loadMonths();
+        if(monthSelect.options.length) monthSelect.selectedIndex = 0;
+        render();
+      }
+    });
+
+    exportCsvBtn.addEventListener('click', ()=>{
+      const m = monthSelect.value;
+      const arr = loadEntriesFor(m);
+      if(arr.length===0){ alert('Không có dữ liệu để xuất'); return; }
+      const rows = [['date','desc','amount']].concat(arr.map(a=>[a.date, '"'+a.desc.replace(/"/g,'""')+'"', a.amount]));
+      const csv = rows.map(r=>r.join(',')).join('\n');
+      const blob = new Blob([csv],{type:'text/csv;charset=utf-8;'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url; a.download = `chiphi_${m}.csv`; a.click(); URL.revokeObjectURL(url);
+    });
+
+    importCsvBtn.addEventListener('click', ()=> fileInput.click());
+    fileInput.addEventListener('change', ()=>{
+      const f = fileInput.files[0];
+      if(!f) return;
+      const reader = new FileReader();
+      reader.onload = evt=>{
+        const text = evt.target.result;
+        const lines = text.split(/\r?\n/).filter(Boolean);
+        const data = lines.slice(1).map(l=>{
+          const parts = l.split(',');
+          return {date:parts[0], desc:parts[1].replace(/^"|"$/g,'').replace(/""/g,'"'), amount: Number(parts[2])}
+        });
+        if(data.length===0){ alert('File CSV không đúng hoặc rỗng'); return; }
+        const m = monthKey(data[0].date);
+        const existing = loadEntriesFor(m);
+        const merged = existing.concat(data);
+        saveEntriesFor(m, merged);
+        loadMonths();
+        monthSelect.value = m;
+        render();
+        fileInput.value = '';
+      };
+      reader.readAsText(f,'utf-8');
+    });
+
+    // Ensure months list updates if localStorage changed elsewhere
+    window.addEventListener('storage', ()=>{ loadMonths(); render(); });
+  </script>
+</body>
+</html>
